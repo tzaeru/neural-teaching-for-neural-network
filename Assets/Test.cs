@@ -11,9 +11,11 @@ using System.IO;
 
 class Test : MonoBehaviour
 {
+    static public ImageData image_data;
+
     private void Start()
     {
-        print("HI");
+        image_data = FindObjectOfType<ImageData>();
 
         Momentum();
     }
@@ -26,18 +28,17 @@ class Test : MonoBehaviour
     static void Momentum()
     {
         const uint num_layers = 3;
-        const uint num_neurons_hidden = 96;
-        const float desired_error = 0.00007F;
-
+        const uint num_neurons_hidden = 20;
+        const float desired_error = 0.01F;
 
         using (TrainingData trainData = new TrainingData())
         using (TrainingData testData = new TrainingData())
         {
-            trainData.CreateTrainFromCallback(374, 48, 3, TrainingDataCallback);
-            testData.CreateTrainFromCallback(594, 48, 3, TestDataCallback);
+            trainData.CreateTrainFromCallback(500, (uint)(image_data.image_size * image_data.image_size), 1, TrainingDataCallback);
+            testData.CreateTrainFromCallback(500, (uint)(image_data.image_size * image_data.image_size), 1, TestDataCallback);
 
             // Test Accessor classes
-            for (int i = 0; i < trainData.TrainDataLength; i++)
+            /*for (int i = 0; i < trainData.TrainDataLength; i++)
             {
                 print(String.Format("Input {0}: ", i));
                 for (int j = 0; j < trainData.InputCount; j++)
@@ -50,26 +51,25 @@ class Test : MonoBehaviour
                     print(String.Format("{0}, ", trainData.OutputAccessor[i][j]));
                 }
                 print(String.Format(""));
-            }
+            }*/
 
-            for (float momentum = 0.0F; momentum < 0.7F; momentum += 0.1F)
+            using (NeuralNet net = new NeuralNet(NetworkType.LAYER, num_layers, trainData.InputCount, num_neurons_hidden, trainData.OutputCount))
             {
-                print(String.Format("============= momentum = {0} =============\n", momentum));
-                using (NeuralNet net = new NeuralNet(NetworkType.LAYER, num_layers, trainData.InputCount, num_neurons_hidden, trainData.OutputCount))
-                {
-                    net.SetCallback(TrainingCallback, "Hello!");
+                net.SetCallback(TrainingCallback, "");
 
-                    net.TrainingAlgorithm = TrainingAlgorithm.TRAIN_INCREMENTAL;
+                net.TrainingAlgorithm = TrainingAlgorithm.TRAIN_RPROP;
+                net.LearningMomentum = 0.7f;
+                net.LearningRate = 0.2f;
+                net.ActivationFunctionHidden = ActivationFunction.SIGMOID_SYMMETRIC;
+                net.ActivationFunctionOutput = ActivationFunction.SIGMOID_SYMMETRIC;
+                
 
-                    net.LearningMomentum = momentum;
+                net.TrainOnData(trainData, 1000, 100, desired_error);
 
-                    net.TrainOnData(trainData, 20000, 500, desired_error);
-
-                    print(String.Format("MSE error on train data: {0}", net.TestData(trainData)));
-                    print(String.Format("MSE error on test data: {0}", net.TestData(testData)));
-                }
-
+                print(String.Format("MSE error on train data: {0}", net.TestData(trainData)));
+                print(String.Format("MSE error on test data: {0}", net.TestData(testData)));
             }
+            print("Ending1");
         }
 
     }
@@ -78,47 +78,75 @@ class Test : MonoBehaviour
     static StreamReader testFile = null;
     static void TrainingDataCallback(uint number, uint inputCount, uint outputCount, DataType[] input, DataType[] output)
     {
-        if (trainingFile == null)
+        print("input count: " + inputCount);
+
+        bool take_target = number%2 == 0 ? true : false;
+        float[] image;
+
+
+        if (take_target)
         {
-            trainingFile = new StreamReader("datasets\\robot.train");
-            trainingFile.ReadLine(); // The info on the first line is provided by the callee
+            image = image_data.target_images[(int)number/2 % image_data.target_images.Count];
         }
-        if (number % 100 == 99)
+        else
+            image = image_data.other_images[(int)number/2 % image_data.other_images.Count];
+        /*if (take_target)
+            image = image_data.GetRandomTargetImage();
+        else
+            image = image_data.GetRandomOtherImage();*/
+
+        for (int i = 0; i < image_data.image_size * image_data.image_size; i++)
         {
-            System.GC.Collect(); // Make sure nothing's getting garbage-collected prematurely
-            GC.WaitForPendingFinalizers();
+            input[i] = image[i];
         }
-        GetDataFromStream(trainingFile, inputCount, input);
-        GetDataFromStream(trainingFile, outputCount, output);
+
+        if (take_target)
+            output[0] = 1.0f;
+        else
+            output[0] = -1.0f;
+
+        /*
+                if (take_target)
+        {
+            output[0] = 1.0f;
+            output[1] = -1.0f;
+        }
+        else
+        {
+            output[0] = -1.0f;
+            output[1] = 1.0f;
+        }
+        */
     }
 
     static void TestDataCallback(uint number, uint inputCount, uint outputCount, DataType[] input, DataType[] output)
     {
-        if (testFile == null)
-        {
-            testFile = new StreamReader("datasets\\robot.test");
-            testFile.ReadLine(); // The info on the first line is provided by the callee
-        }
-        if (number % 100 == 99)
-        {
-            System.GC.Collect(); // Make sure nothing's getting garbage-collected prematurely
-            GC.WaitForPendingFinalizers();
-        }
-        GetDataFromStream(testFile, inputCount, input);
-        GetDataFromStream(testFile, outputCount, output);
-    }
+        print("Outpout c: " + outputCount);
+        bool take_target = number % 2 == 0 ? true : false;
+        float[] image;
+        number += 500;
 
-    static void GetDataFromStream(StreamReader file, uint count, DataType[] output)
-    {
-        string[] tokens = file.ReadLine().Split(new char[] { ' ' });
-        for (int i = 0; i < count; i++)
+        if (take_target)
         {
-            output[i] = DataType.Parse(tokens[i]);
+            image = image_data.target_images[(int)number/2 % image_data.target_images.Count];
         }
+        else
+            image = image_data.other_images[(int)number/2 % image_data.other_images.Count];
+
+        for (int i = 0; i < image_data.image_size * image_data.image_size; i++)
+        {
+            input[i] = image[i];
+        }
+
+        if (take_target)
+            output[0] = 1.0f;
+        else
+            output[0] = -1.0f;
     }
 
     static int TrainingCallback(NeuralNet net, TrainingData data, uint maxEpochs, uint epochsBetweenReports, float desiredError, uint epochs, object userData)
     {
+        print(String.Format("CAAAAAAAAALLLBAAAAAAAACK: MSE error on train data: {0}", net.TestData(data)));
         System.GC.Collect(); // Make sure nothing's getting garbage-collected prematurely
         GC.WaitForPendingFinalizers();
         print(String.Format("Callback: Last neuron weight: {0}, Last data input: {1}, Max epochs: {2}\nEpochs between reports: {3}, Desired error: {4}, Current epoch: {5}\nGreeting: \"{6}\"",
@@ -126,61 +154,5 @@ class Test : MonoBehaviour
                             maxEpochs, epochsBetweenReports, desiredError, epochs, userData));
         return 1;
     }
-
-    void Train()
-    {
-        const uint num_input = 3;
-        const uint num_output = 1;
-        const uint num_layers = 4;
-        const uint num_neurons_hidden = 5;
-        const float desired_error = 0.0001F;
-        const uint max_epochs = 5000;
-        const uint epochs_between_reports = 1000;
-        using (NeuralNet net = new NeuralNet(NetworkType.LAYER, num_layers, num_input, num_neurons_hidden, num_neurons_hidden, num_output))
-        {
-            net.ActivationFunctionHidden = ActivationFunction.SIGMOID_SYMMETRIC;
-            net.ActivationFunctionOutput = ActivationFunction.LINEAR;
-            net.TrainingAlgorithm = TrainingAlgorithm.TRAIN_RPROP;
-            using (TrainingData data = new TrainingData("datasets\\scaling.data"))
-            {
-                net.SetScalingParams(data, -1, 1, -1, 1);
-                net.ScaleTrain(data);
-
-                net.TrainOnData(data, max_epochs, epochs_between_reports, desired_error);
-                net.Save("scaling.net");
-
-            }
-        }
-    }
-
-    void TestNet()
-    {
-        DataType[] calc_out;
-        print("Creating network.");
-
-        using (NeuralNet net = new NeuralNet("scaling.net"))
-        {
-            net.PrintConnections();
-            net.PrintParameters();
-            print("Testing network.");
-            using (TrainingData data = new TrainingData("datasets\\scaling.data"))
-            {
-                for (int i = 0; i < data.TrainDataLength; i++)
-                {
-                    net.ResetMSE();
-                    net.ScaleInput(data.GetTrainInput((uint)i));
-                    calc_out = net.Run(data.GetTrainInput((uint)i));
-                    net.DescaleOutput(calc_out);
-                    print(String.Format("Result {0} original {1} error {2}", calc_out[0], data.OutputAccessor[i][0],
-                                      FannAbs(calc_out[0] - data.OutputAccessor[i][0])));
-                }
-
-            }
-        }
-    }
-
-    static float FannAbs(float value)
-    {
-        return (((value) > 0) ? (value) : -(value));
-    }
 }
+ 
